@@ -1,0 +1,39 @@
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: openshift-cleanup
+  namespace: cleanup
+  labels:
+    app: cleanup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-container-cleanup
+rules:
+- apiGroups: [""]
+  resources:
+     - "nodes"
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources:
+     - "pods"
+     - "pods/log"
+  verbs: ["get", "list", "create", "delete", "watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openshift-container-cleanup
+  labels:
+    app: cleanup
+subjects:
+  - kind: ServiceAccount
+    name: openshift-cleanup
+    namespace: cleanup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-container-cleanup
+---
