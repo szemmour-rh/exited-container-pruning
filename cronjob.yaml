@@ -1,0 +1,35 @@
+kind: CronJob
+apiVersion: batch/v1
+metadata:
+  name: openshift-container-cleanup
+  namespace: cleanup
+  labels:
+    app: cleanup
+spec:
+  schedule: "0 */12 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    metadata:
+      labels:
+        app: cleanup
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: openshift-cleanup
+        spec:
+          containers:
+            - name: backup
+              image: "registry.redhat.io/openshift4/ose-cli"
+              command:
+                - "/bin/bash"
+                - "-c"
+                - oc get no -l node-role.kubernetes.io/worker --no-headers -o name | xargs -I {} --  oc debug {}  --to-namespace=cleanup -- bash -c "chroot /host  n=$(crictl ps  --state exited | wc -l)  &&  p=$(($n - 2000)) && if (( $p > 0 )); then crictl rm $(crictl ps  -q --state exited | tail -n $p) ;fi"
+          restartPolicy: "Never"
+          terminationGracePeriodSeconds: 30
+          activeDeadlineSeconds: 500
+          serviceAccountName: "openshift-cleanup"
+          serviceAccount: "openshift-cleanup"
