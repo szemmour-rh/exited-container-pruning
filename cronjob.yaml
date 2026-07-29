@@ -22,14 +22,40 @@ spec:
             app: openshift-cleanup
         spec:
           containers:
-            - name: backup
+            - name: container-cleanup
               image: "registry.redhat.io/openshift4/ose-cli"
+              env:
+                - name: CONTAINER_THRESHOLD
+                  value: "2000"
               command:
                 - "/bin/bash"
                 - "-c"
-                - oc get no -l node-role.kubernetes.io/worker --no-headers -o name | xargs -I {} --  oc debug {}  --to-namespace=cleanup -- bash -c "chroot /host  n=$(crictl ps  --state exited | wc -l)  &&  p=$(($n - 2000)) && if (( $p > 0 )); then crictl rm $(crictl ps  -q --state exited | tail -n $p) ;fi"
+                - |
+                  set -uo pipefail
+                  THRESHOLD=${CONTAINER_THRESHOLD:-2000}
+                  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting exited container cleanup (threshold: $THRESHOLD)"
+                  for NODE in $(oc get no -l node-role.kubernetes.io/worker --no-headers -o custom-columns=NAME:.metadata.name); do
+                    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Processing node: $NODE"
+                    oc debug "node/$NODE" --to-namespace=cleanup -- bash -c "
+                      chroot /host bash -c '
+                        IDS=\$(crictl ps -q --state exited)
+                        COUNT=\$(echo \"\$IDS\" | grep -c . || true)
+                        EXCESS=\$((COUNT - $THRESHOLD))
+                        echo \"Exited containers: \$COUNT | Threshold: $THRESHOLD | Excess: \$EXCESS\"
+                        if [ \$EXCESS -gt 0 ]; then
+                          echo \"Removing \$EXCESS oldest exited containers...\"
+                          echo \"\$IDS\" | tail -n \$EXCESS | xargs -r crictl rm
+                          REMAINING=\$(crictl ps -q --state exited | grep -c . || true)
+                          echo \"Cleanup complete. Remaining exited containers: \$REMAINING\"
+                        else
+                          echo \"Below threshold. No action needed.\"
+                        fi
+                      '
+                    " 2>&1 || echo "[WARN] Failed to process node: $NODE"
+                  done
+                  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] All nodes processed."
           restartPolicy: "Never"
           terminationGracePeriodSeconds: 30
-          activeDeadlineSeconds: 500
+          activeDeadlineSeconds: 3600
           serviceAccountName: "openshift-cleanup"
           serviceAccount: "openshift-cleanup"
